@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Example of serverless internal api to api authentication/authorisation using Cognito's client credentials grant flow, based on the following [blog post](/)
+Example of serverless internal api to api authentication/authorisation using Cognito's client credentials grant flow, based on the following [blog post](https://leejamesgilmore.medium.com/serverless-api-to-api-authentication-d4cb4472721e)
 
 In the Serverless World, there are always situations when developing solutions that two or more internal APIs need to communicate with each other. The gold standard would be totally decoupled domain services using events, but in reality, there are often reasons why you need a machine to machine style communication using REST.
 
