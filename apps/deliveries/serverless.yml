@@ -1,0 +1,45 @@
+service: serverless-deliveries
+provider:
+  name: aws
+  runtime: nodejs12.x
+  lambdaHashingVersion: 20201221
+  memorySize: 128
+  stage: ${opt:stage, 'develop'}
+  region: ${opt:region, 'eu-west-1'}
+  apiGateway:
+    shouldStartNameWithService: true
+# the following plugins are used for:
+plugins:
+  - serverless-webpack # used for building the code
+package:
+  individually: true
+  # we exclude the node_modules as this keeps our lambda package size small
+  exclude:
+    - node_modules/**
+functions:
+  # create delivery endpoint
+  create-delivery:
+    handler: src/create-delivery/create-delivery.handler
+    memorySize: 128
+    timeout: 10
+    # this is the api gateway integration with our lambda function
+    events:
+      - http:
+          path: /deliveries
+          method: post
+          authorizer:
+            # import the arn via ssm
+            arn: ${ssm:/serverless-auth/${self:provider.stage}/userpool-arn}
+            # tie down this endpoint to require the 'create.delivery' valid scope from a consumer
+            scopes:
+              - serverless-auth-service-develop-deliveries/create.delivery
+resources:
+  Resources:
+custom:
+  # webpack config
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules:
+      # we also force exclude the aws-sdk through webpack
+      forceExclude:
+        - aws-sdk

@@ -1,0 +1,218 @@
+service: serverless-auth-service
+variablesResolutionMode: 20210326
+provider:
+  name: aws
+  runtime: nodejs12.x
+  lambdaHashingVersion: 20201221
+  memorySize: 128
+  stage: ${opt:stage, 'develop'}
+  region: ${opt:region, 'eu-west-1'}
+package:
+  individually: true
+  # we exclude the node_modules as this keeps our lambda package size small
+  exclude:
+    - node_modules/**
+functions:
+  # this lambda is used to populate the client secrets into ssm as a workaround to a known bug
+  populate-client-settings:
+    handler: src/populate-client-settings/populate-client-settings.handler
+    role: ClientSettingsRole
+    memorySize: 128
+    timeout: 10
+    ## these variables are used to get the client secret since cloudformation doesn't return them
+    environment:
+      USER_POOL_ID:
+        Ref: UserPoolResource
+      APP_CLIENT_ID:
+        Ref: UserPoolClientResource
+      STAGE: ${self:provider.stage}
+  # this lambda simply removes the ssm params that were created in the lambda above
+  remove-client-settings:
+    handler: src/remove-client-settings/remove-client-settings.handler
+    role: ClientSettingsRole
+    memorySize: 128
+    timeout: 10
+    environment:
+      STAGE: ${self:provider.stage}
+# the following plugins are used for:
+plugins:
+  - serverless-webpack # used for building the code
+  - serverless-plugin-scripts # used to invoke our function on post deploy
+custom:
+  # custom variables to use across the stack
+  userPoolName: serverless-auth-service-${self:provider.stage}
+  orderServiceClient: order-service-client-${self:provider.stage}  
+  userPoolDomain: 'https://${self:custom.userPoolName}.auth.${self:provider.region}.amazoncognito.com'
+  # hooks used to invoke a lambda at the end of the deploy to populate the app secrets in ssm
+  scripts:
+    hooks:
+      'deploy:finalize': sls invoke -f populate-client-settings
+  # webpack config
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules:
+      # we also force exclude the aws-sdk through webpack
+      forceExclude:
+        - aws-sdk
+resources:
+  Resources:
+    # create client settings role
+    ClientSettingsRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: ClientSettingsRole
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: ClientSettingsPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - 'Fn::Join':
+                        - ':'
+                        - - 'arn:aws:logs'
+                          - Ref: 'AWS::Region'
+                          - Ref: 'AWS::AccountId'
+                          - 'log-group:/aws/lambda/*:*:*'
+                - Effect: Allow
+                  Action:
+                    - cognito-idp:DescribeUserPoolClient
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - ssm:PutParameter
+                    - ssm:DeleteParameters
+                  Resource: '*'
+    # push the user pool domain value to parameter store
+    UserPoolDomainSSMParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: '/serverless-auth/${self:provider.stage}/userpool-domain'
+        Type: String
+        Value: ${self:custom.userPoolDomain}
+        Description: SSM Parameter for cognito userpool domain URL.
+    # push the user pool arn value to parameter store
+    UserPoolArnSSMParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: '/serverless-auth/${self:provider.stage}/userpool-arn'
+        Type: String
+        Value:
+          Fn::GetAtt:
+          - UserPoolResource
+          - Arn
+        Description: SSM Parameter for cognito userpool arn.
+    # create the user pool
+    UserPoolResource:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:custom.userPoolName}
+    # create the client i.e. orders service (the client is the consumer of the resource server)
+    UserPoolClientResource:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        AllowedOAuthFlows:
+          - client_credentials
+        AllowedOAuthFlowsUserPoolClient: true
+        GenerateSecret: 'true'
+        ClientName: ${self:custom.orderServiceClient}
+        PreventUserExistenceErrors: ENABLED
+        RefreshTokenValidity: 30
+        AccessTokenValidity: 1
+        SupportedIdentityProviders:
+          - COGNITO
+        AllowedOAuthScopes:
+          - '${self:custom.userPoolName}-deliveries/create.delivery'
+          - '${self:custom.userPoolName}-deliveries/cancel.delivery'
+        UserPoolId:
+          Ref: UserPoolResource
+      DependsOn:
+      - UserPoolResourceServerResourceDelivery
+      - UserPoolResourceServerResourcePayments
+    # create the resource server i.e. the delivery service
+    UserPoolResourceServerResourceDelivery:
+      Type: AWS::Cognito::UserPoolResourceServer
+      Properties:
+        UserPoolId:
+          Ref: UserPoolResource
+        Identifier: ${self:custom.userPoolName}-deliveries
+        Name: ${self:custom.userPoolName}-deliveries
+        Scopes:
+        - ScopeName: create.delivery
+          ScopeDescription: create delivery
+        - ScopeName: cancel.delivery
+          ScopeDescription: cancel delivery
+        - ScopeName: amend.delivery
+          ScopeDescription: amend delivery
+    # create the resource server i.e. payment service (just to see how this works with multiple resources)
+    UserPoolResourceServerResourcePayments:
+      Type: AWS::Cognito::UserPoolResourceServer
+      Properties:
+        UserPoolId:
+          Ref: UserPoolResource
+        Identifier: ${self:custom.userPoolName}-payments
+        Name: ${self:custom.userPoolName}-payments
+        Scopes:
+        - ScopeName: create.payment
+          ScopeDescription: create payment
+        - ScopeName: cancel.payment
+          ScopeDescription: cancel payment
+        - ScopeName: amend.payment
+          ScopeDescription: amend payment
+    UserPoolDomainResource:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        Domain: ${self:custom.userPoolName}
+        UserPoolId:
+          Ref: UserPoolResource
+  # these outputs are exported out to be used (input) in other serverless stacks
+  Outputs:
+    AppClientID:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-ClientID'
+      Value: !Ref 'UserPoolClientResource'
+    UserPoolARN:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-SubnetID'
+      Value:
+        Fn::GetAtt:
+        - UserPoolResource
+        - Arn
+    UserPoolProviderURL:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-UserPoolProviderURL'
+      Value:
+        Fn::GetAtt:
+        - UserPoolResource
+        - ProviderURL
+    UserPoolProviderName:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-UserPoolProviderName'
+      Value:
+        Fn::GetAtt:
+        - UserPoolResource
+        - ProviderName
+    UserPoolProviderArn:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-UserPoolProviderArn'
+      Value:
+        Fn::GetAtt:
+        - UserPoolResource
+        - Arn
+    UserPoolID:
+      Export:
+        Name: 'serverless-auth-service-${self:provider.stage}-UserPoolID'
+      Value:
+        Ref: UserPoolResource

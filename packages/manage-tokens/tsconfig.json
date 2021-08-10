@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.build.json",
+  "include": ["./src/**/*.ts"],
+  "compilerOptions": {
+    "outDir": "./lib",
+    "module": "commonjs",
+    "strict": true,
+    "sourceMap": true,
+    "declaration": true
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "serverless-api-to-api-auth",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Example of serverless internal api to api authentication/authorisation using Cognito's client credentials grant flow",
+  "scripts": {
+    "build": "lerna run build --stream",
+    "prettier": "npx prettier --write .",
+    "bootstrap": "lerna bootstrap",
+    "clean": "lerna clean",
+    "build:develop": "lerna run build:develop --stream"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leegilmorecode/serverless-api-to-api-auth.git"
+  },
+  "author": "Lee Gilmore",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/leegilmorecode/serverless-api-to-api-auth/issues"
+  },
+  "homepage": "https://github.com/leegilmorecode/serverless-api-to-api-auth#readme",
+  "devDependencies": {
+    "@types/node": "^16.4.13",
+    "@typescript-eslint/eslint-plugin": "^4.29.0",
+    "eslint-plugin-simple-import-sort": "^7.0.0",
+    "lerna": "^4.0.0",
+    "typescript": "^4.3.5"
+  }
+}
